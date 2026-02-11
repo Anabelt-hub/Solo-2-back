@@ -5,9 +5,6 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
-
-# Allow Netlify (and other origins) to call your API
-# Later you can lock this down to only your Netlify site.
 CORS(app)
 
 BASE_DIR = os.path.dirname(__file__)
@@ -16,7 +13,6 @@ DATA_FILE = os.path.join(BASE_DIR, "data", "records.json")
 
 # -------------------- File helpers --------------------
 def ensure_data_file():
-    """Ensure data directory + records.json exist."""
     os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     if not os.path.exists(DATA_FILE):
         with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -29,31 +25,65 @@ def write_records(records):
         json.dump(records, f, indent=2)
 
 
-def seed_records(n=30):
-    """Create N starter watchlist records."""
-    seed = []
-    genres = ["Action", "Drama", "Comedy", "Sci-Fi", "Horror", "Fantasy"]
-    types = ["Movie", "Show", "Anime", "Book", "Game"]
-    statuses = ["Planned", "Watching", "Completed", "Dropped"]
-
-    for i in range(n):
-        seed.append({
+def seed_records():
+    """Return >=30 real movie/TV records (watchlist domain)."""
+    def rec(title, rtype, genre, year, rating, status, notes=""):
+        return {
             "id": str(uuid.uuid4()),
-            "title": f"Seed Title {i + 1}",
-            "type": types[i % len(types)],
-            "genre": genres[i % len(genres)],
-            "year": 2000 + (i % 20),
-            "rating": None,
-            "status": statuses[i % len(statuses)],
-            "notes": ""
-        })
-    return seed
+            "title": title,
+            "type": rtype,
+            "genre": genre,
+            "year": year,
+            "rating": rating,
+            "status": status,
+            "notes": notes
+        }
+
+    # 35 records (mix of movies + shows)
+    return [
+        rec("The Dark Knight", "Movie", "Action", 2008, 9, "Completed"),
+        rec("Inception", "Movie", "Sci-Fi", 2010, 9, "Completed"),
+        rec("Interstellar", "Movie", "Sci-Fi", 2014, 9, "Completed"),
+        rec("The Matrix", "Movie", "Sci-Fi", 1999, 9, "Completed"),
+        rec("Parasite", "Movie", "Thriller", 2019, 9, "Completed"),
+        rec("Get Out", "Movie", "Horror", 2017, 8, "Completed"),
+        rec("The Shawshank Redemption", "Movie", "Drama", 1994, 10, "Completed"),
+        rec("Pulp Fiction", "Movie", "Crime", 1994, 9, "Completed"),
+        rec("Spirited Away", "Movie", "Animation", 2001, 10, "Completed"),
+        rec("Avengers: Endgame", "Movie", "Action", 2019, 8, "Completed"),
+        rec("Spider-Man: Into the Spider-Verse", "Movie", "Animation", 2018, 9, "Completed"),
+        rec("The Lion King", "Movie", "Animation", 1994, 9, "Completed"),
+        rec("Dune", "Movie", "Sci-Fi", 2021, 8, "Completed"),
+        rec("Oppenheimer", "Movie", "Drama", 2023, 9, "Completed"),
+        rec("Barbie", "Movie", "Comedy", 2023, 7, "Completed"),
+        rec("Top Gun: Maverick", "Movie", "Action", 2022, 8, "Completed"),
+        rec("The Social Network", "Movie", "Drama", 2010, 8, "Completed"),
+        rec("La La Land", "Movie", "Romance", 2016, 8, "Completed"),
+        rec("Knives Out", "Movie", "Mystery", 2019, 8, "Completed"),
+        rec("The Grand Budapest Hotel", "Movie", "Comedy", 2014, 8, "Completed"),
+
+        rec("Breaking Bad", "Show", "Drama", 2008, 10, "Completed"),
+        rec("Better Call Saul", "Show", "Drama", 2015, 9, "Completed"),
+        rec("Stranger Things", "Show", "Sci-Fi", 2016, 8, "Watching"),
+        rec("The Office", "Show", "Comedy", 2005, 8, "Completed"),
+        rec("Game of Thrones", "Show", "Fantasy", 2011, 7, "Completed"),
+        rec("House of the Dragon", "Show", "Fantasy", 2022, 8, "Watching"),
+        rec("The Mandalorian", "Show", "Sci-Fi", 2019, 8, "Watching"),
+        rec("The Witcher", "Show", "Fantasy", 2019, 7, "Watching"),
+        rec("Black Mirror", "Show", "Sci-Fi", 2011, 9, "Completed"),
+        rec("The Boys", "Show", "Action", 2019, 8, "Watching"),
+        rec("The Crown", "Show", "Drama", 2016, 8, "Planned"),
+        rec("The Sopranos", "Show", "Drama", 1999, 10, "Planned"),
+        rec("Narcos", "Show", "Drama", 2015, 8, "Completed"),
+        rec("The Walking Dead", "Show", "Horror", 2010, 7, "Dropped"),
+        rec("Chernobyl", "Show", "Drama", 2019, 10, "Completed"),
+    ]
 
 
 def read_records():
     """
     Read records from JSON.
-    ✅ If missing/invalid/empty/<30: seed to 30 and persist.
+    ✅ Seed ONLY if file is missing/invalid/empty (so deletes do NOT respawn records).
     """
     ensure_data_file()
 
@@ -66,9 +96,9 @@ def read_records():
     if not isinstance(records, list):
         records = []
 
-    # ✅ Assignment requirement: start with at least 30 records
-    if len(records) < 30:
-        records = seed_records(30)
+    # ✅ Seed only when empty (meets "start with >=30" without blocking deletes)
+    if len(records) == 0:
+        records = seed_records()
         write_records(records)
 
     return records
@@ -88,7 +118,6 @@ def validate_record(data):
     if not genre:
         return "Genre is required."
 
-    # Year
     try:
         year = int(data.get("year"))
     except Exception:
@@ -100,7 +129,6 @@ def validate_record(data):
     if not status:
         return "Status is required."
 
-    # Rating (optional)
     rating = data.get("rating", None)
     if rating is not None:
         try:
@@ -145,7 +173,7 @@ def create_record():
         "notes": (data.get("notes") or "").strip(),
     }
 
-    # Insert at top (newest-first)
+    # Newest-first
     records.insert(0, new_rec)
     write_records(records)
     return jsonify(new_rec), 201
