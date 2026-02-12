@@ -39,7 +39,7 @@ def seed_records():
             "notes": notes
         }
 
-    # 35 records (mix of movies + shows)
+    # 35 realistic titles
     return [
         rec("The Dark Knight", "Movie", "Action", 2008, 9, "Completed"),
         rec("Inception", "Movie", "Sci-Fi", 2010, 9, "Completed"),
@@ -83,7 +83,7 @@ def seed_records():
 def read_records():
     """
     Read records from JSON.
-    ✅ Seed ONLY if file is missing/invalid/empty (so deletes do NOT respawn records).
+    ✅ Seed ONLY if missing/invalid/empty (so deletes do NOT respawn records).
     """
     ensure_data_file()
 
@@ -96,7 +96,6 @@ def read_records():
     if not isinstance(records, list):
         records = []
 
-    # ✅ Seed only when empty (meets "start with >=30" without blocking deletes)
     if len(records) == 0:
         records = seed_records()
         write_records(records)
@@ -144,13 +143,92 @@ def validate_record(data):
 # -------------------- Routes --------------------
 @app.get("/")
 def home():
-    return "Solo Project 2 API is running. Try /api/records", 200
+    return "Solo Project 2 API is running. Try /api/records and /api/stats", 200
 
 
 @app.get("/api/records")
 def get_records():
+    """
+    Paging endpoint (fixed size=10).
+    Supports: page, search, status
+    Returns: { items, page, pageSize, total, totalPages }
+    """
     records = read_records()
-    return jsonify(records), 200
+
+    # Query params
+    page = int(request.args.get("page", 1))
+    page_size = 10  # fixed per rubric
+    search = (request.args.get("search") or "").strip().lower()
+    status = (request.args.get("status") or "ALL").strip()
+
+    # Filter: search by title
+    if search:
+        records = [r for r in records if search in (r.get("title", "").lower())]
+
+    # Filter: status
+    if status != "ALL":
+        records = [r for r in records if r.get("status") == status]
+
+    total = len(records)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+
+    # Clamp page
+    page = max(1, min(page, total_pages))
+
+    start = (page - 1) * page_size
+    end = start + page_size
+    items = records[start:end]
+
+    return jsonify({
+        "items": items,
+        "page": page,
+        "pageSize": page_size,
+        "total": total,
+        "totalPages": total_pages
+    }), 200
+
+
+@app.get("/api/stats")
+def get_stats():
+    """Stats for the ENTIRE dataset (not just current page)."""
+    records = read_records()
+    total = len(records)
+
+    completed = [r for r in records if r.get("status") == "Completed"]
+    completed_count = len(completed)
+
+    completed_rated = [r for r in completed if isinstance(r.get("rating"), int)]
+    if completed_rated:
+        avg_rating_completed = round(sum(r["rating"] for r in completed_rated) / len(completed_rated), 1)
+    else:
+        avg_rating_completed = None
+
+    # Domain-specific stat: Most common genre across entire dataset
+    genre_counts = {}
+    for r in records:
+        g = (r.get("genre") or "").strip()
+        if not g:
+            continue
+        genre_counts[g] = genre_counts.get(g, 0) + 1
+    top_genre = None
+    if genre_counts:
+        top_genre = max(genre_counts.items(), key=lambda kv: kv[1])[0]
+
+    # Status breakdown
+    statuses = ["Planned", "Watching", "Completed", "Dropped"]
+    by_status = {s: 0 for s in statuses}
+    for r in records:
+        s = r.get("status")
+        if s in by_status:
+            by_status[s] += 1
+
+    return jsonify({
+        "totalRecords": total,
+        "completedCount": completed_count,
+        "avgRatingCompleted": avg_rating_completed,
+        "topGenre": top_genre,
+        "byStatus": by_status
+    }), 200
 
 
 @app.post("/api/records")
@@ -173,8 +251,7 @@ def create_record():
         "notes": (data.get("notes") or "").strip(),
     }
 
-    # Newest-first
-    records.insert(0, new_rec)
+    records.insert(0, new_rec)  # newest-first
     write_records(records)
     return jsonify(new_rec), 201
 
@@ -215,7 +292,6 @@ def delete_record(rid):
     return jsonify({"ok": True}), 200
 
 
-# -------------------- Run locally / Render --------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
